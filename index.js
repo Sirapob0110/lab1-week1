@@ -1,130 +1,90 @@
 const express = require("express");
-const app = express();
-const PORT = process.env.PORT || 3000;
+const { graphqlHTTP } = require("express-graphql");
+const schema = require("./schema");
+const root = require("./resolvers");
 
+const app = express();
 app.use(express.json());
 
-// Mock Data
+// ---------- ข้อมูลจำลองสำหรับฝั่ง REST (แยกจาก GraphQL ตามที่เอกสารแล็บกำหนด) ----------
 let students = [
   {
     id: 1,
     name: "สมชาย ใจดี",
     major: "วิทยาการคอมพิวเตอร์",
+    email: "somchai@example.com",
+    phone: "080-000-0001",
+    courseIds: [101, 102],
   },
   {
     id: 2,
     name: "สมหญิง รักเรียน",
     major: "เทคโนโลยีสารสนเทศ",
+    email: "somying@example.com",
+    phone: "080-000-0002",
+    courseIds: [102],
   },
 ];
 
-let nextId = 3;
+let courses = [
+  { id: 101, courseName: "การเขียนโปรแกรมเบื้องต้น", credit: 3 },
+  { id: 102, courseName: "โครงสร้างข้อมูล", credit: 3 },
+];
 
-// หน้าแรก
-app.get("/", (req, res) => {
-  res.status(200).json({
-    message: "Student API พร้อมใช้งาน",
-  });
-});
-
-// GET ALL
+// ---------- REST endpoints (จากสัปดาห์ที่ 1) ----------
 app.get("/api/v1/students", (req, res) => {
-  res.status(200).json({
-    message: "สำเร็จ",
-    data: students,
-  });
+  res.status(200).json({ message: "สำเร็จ", data: students });
 });
 
-// GET BY ID
 app.get("/api/v1/students/:id", (req, res) => {
   const id = Number(req.params.id);
+  const student = students.find((s) => s.id === id);
+  if (!student) {
+    return res.status(404).json({ message: "ไม่พบข้อมูลนักศึกษา" });
+  }
+  res.status(200).json({ message: "สำเร็จ", data: student });
+});
 
+app.get("/api/v1/courses/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const course = courses.find((c) => c.id === id);
+  if (!course) {
+    return res.status(404).json({ message: "ไม่พบข้อมูลรายวิชา" });
+  }
+  res.status(200).json({ message: "สำเร็จ", data: course });
+});
+
+// ---------- ขั้นตอนที่ 2.2: endpoint ที่คืนข้อมูลนักศึกษาพร้อมรายวิชา (over-fetching demo) ----------
+app.get("/api/v1/students/:id/full", (req, res) => {
+  const id = Number(req.params.id);
   const student = students.find((s) => s.id === id);
 
   if (!student) {
-    return res.status(404).json({
-      message: "ไม่พบข้อมูลนักศึกษา",
-    });
+    return res.status(404).json({ message: "ไม่พบข้อมูลนักศึกษา" });
   }
+
+  const studentCourses = courses.filter((c) =>
+    student.courseIds.includes(c.id),
+  );
 
   res.status(200).json({
     message: "สำเร็จ",
-    data: student,
+    data: { ...student, courses: studentCourses },
   });
 });
 
-// POST
-app.post("/api/v1/students", (req, res) => {
-  const { name, major } = req.body;
+// ---------- ขั้นตอนที่ 3.4: เชื่อมต่อ GraphQL เข้ากับ Express ----------
+app.use(
+  "/graphql",
+  graphqlHTTP({
+    schema: schema,
+    rootValue: root,
+    graphiql: true, // เปิดใช้งานหน้าทดสอบ GraphiQL ผ่านเบราว์เซอร์
+  }),
+);
 
-  if (!name || !major) {
-    return res.status(400).json({
-      message: "กรุณาระบุ name และ major ให้ครบถ้วน",
-    });
-  }
-
-  const newStudent = {
-    id: nextId++,
-    name,
-    major,
-  };
-
-  students.push(newStudent);
-
-  res.status(201).json({
-    message: "เพิ่มข้อมูลสำเร็จ",
-    data: newStudent,
-  });
-});
-
-// PUT
-app.put("/api/v1/students/:id", (req, res) => {
-  const id = Number(req.params.id);
-
-  const { name, major } = req.body;
-
-  const student = students.find((s) => s.id === id);
-
-  if (!student) {
-    return res.status(404).json({
-      message: "ไม่พบข้อมูลนักศึกษา",
-    });
-  }
-
-  if (!name || !major) {
-    return res.status(400).json({
-      message: "กรุณาระบุ name และ major ให้ครบถ้วน",
-    });
-  }
-
-  student.name = name;
-  student.major = major;
-
-  res.status(200).json({
-    message: "แก้ไขข้อมูลสำเร็จ",
-    data: student,
-  });
-});
-
-// DELETE
-app.delete("/api/v1/students/:id", (req, res) => {
-  const id = Number(req.params.id);
-
-  const index = students.findIndex((s) => s.id === id);
-
-  if (index === -1) {
-    return res.status(404).json({
-      message: "ไม่พบข้อมูลนักศึกษา",
-    });
-  }
-
-  students.splice(index, 1);
-
-  res.status(200).json({
-    message: "ลบข้อมูลสำเร็จ",
-  });
-});
-
+const PORT = 3000;
 app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`Server กำลังทำงานที่ http://localhost:${PORT}`);
+  console.log(`GraphiQL: http://localhost:${PORT}/graphql`);
 });
