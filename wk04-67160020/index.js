@@ -4,7 +4,7 @@ const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
 const morgan = require("morgan");
-const pool = require("./db");
+const pool = require("../db");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
