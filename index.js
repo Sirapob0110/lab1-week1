@@ -5,6 +5,12 @@ const helmet = require("helmet");
 const cors = require("cors");
 const morgan = require("morgan");
 const pool = require("./db");
+const {
+  hashPassword,
+  verifyPassword,
+  generateToken,
+} = require("./auth-helpers");
+const { authenticateToken, authorizeRole } = require("./middlewares/auth");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -68,6 +74,148 @@ function simpleRateLimit(req, res, next) {
 
 // ===================== Routes (สัปดาห์ที่ 5: ย้ายไปใช้ MySQL) =====================
 const router = express.Router();
+
+// ===================== Authentication (สัปดาห์ที่ 6) =====================
+
+// POST /api/v1/auth/register - สมัครสมาชิกใหม่ (role เป็น 'student' เสมอ กัน Mass Assignment)
+router.post("/auth/register", async (req, res, next) => {
+  const { email, password } = req.body || {};
+
+  if (!email || !password) {
+    return res.status(400).json({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "กรุณาระบุ email และ password",
+      },
+    });
+  }
+
+  try {
+    const passwordHash = await hashPassword(password);
+    const [result] = await pool.query(
+      "INSERT INTO users (email, password_hash, role) VALUES (?, ?, 'student')",
+      [email, passwordHash],
+    );
+
+    res.status(201).json({
+      message: "สมัครสมาชิกสำเร็จ",
+      data: { id: result.insertId, email, role: "student" },
+    });
+  } catch (err) {
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({
+        error: { code: "DUPLICATE_EMAIL", message: "อีเมลนี้มีอยู่ในระบบแล้ว" },
+      });
+    }
+    next(err);
+  }
+});
+
+// POST /api/v1/auth/login - เข้าสู่ระบบ ออก JWT
+router.post("/auth/login", async (req, res, next) => {
+  const { email, password } = req.body || {};
+
+  if (!email || !password) {
+    return res.status(400).json({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "กรุณาระบุ email และ password",
+      },
+    });
+  }
+
+  try {
+    const [rows] = await pool.query("SELECT * FROM users WHERE email = ?", [
+      email,
+    ]);
+
+    if (rows.length === 0) {
+      return res.status(401).json({
+        error: {
+          code: "INVALID_CREDENTIALS",
+          message: "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+        },
+      });
+    }
+
+    const user = rows[0];
+    const isPasswordValid = await verifyPassword(password, user.password_hash);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        error: {
+          code: "INVALID_CREDENTIALS",
+          message: "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+        },
+      });
+    }
+
+    const token = generateToken(user);
+    res.status(200).json({ message: "เข้าสู่ระบบสำเร็จ", token });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/auth/me - เฉพาะผู้ที่ล็อกอินแล้วเท่านั้นที่ดูข้อมูลของตนเองได้
+router.get("/auth/me", authenticateToken, (req, res) => {
+  res.status(200).json({ message: "สำเร็จ", data: req.user });
+});
+
+// PATCH /api/v1/auth/change-password - แบบฝึกหัดต่อยอดที่ 1: เปลี่ยนรหัสผ่าน
+router.patch(
+  "/auth/change-password",
+  authenticateToken,
+  async (req, res, next) => {
+    const { oldPassword, newPassword } = req.body || {};
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "กรุณาระบุ oldPassword และ newPassword",
+        },
+      });
+    }
+
+    try {
+      const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [
+        req.user.id,
+      ]);
+
+      if (rows.length === 0) {
+        return res.status(404).json({
+          error: { code: "USER_NOT_FOUND", message: "ไม่พบผู้ใช้งาน" },
+        });
+      }
+
+      const user = rows[0];
+      const isOldPasswordValid = await verifyPassword(
+        oldPassword,
+        user.password_hash,
+      );
+
+      if (!isOldPasswordValid) {
+        return res.status(401).json({
+          error: {
+            code: "INVALID_CREDENTIALS",
+            message: "รหัสผ่านเดิมไม่ถูกต้อง",
+          },
+        });
+      }
+
+      const newPasswordHash = await hashPassword(newPassword);
+      await pool.query("UPDATE users SET password_hash = ? WHERE id = ?", [
+        newPasswordHash,
+        req.user.id,
+      ]);
+
+      res.status(200).json({ message: "เปลี่ยนรหัสผ่านสำเร็จ" });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // GET /api/v1/students - ดึงรายชื่อนักศึกษาทั้งหมด
 router.get("/students", async (req, res, next) => {
@@ -159,7 +307,8 @@ router.post("/students", simpleRateLimit, async (req, res, next) => {
 });
 
 // PUT /api/v1/students/:id - แก้ไขข้อมูลนักศึกษาแบบเต็ม
-router.put("/students/:id", async (req, res, next) => {
+// แบบฝึกหัดต่อยอดที่ 2: Object-level Authorization - แก้ไขได้เฉพาะเจ้าของบัญชี (user_id ตรงกัน) หรือ admin เท่านั้น
+router.put("/students/:id", authenticateToken, async (req, res, next) => {
   const { name, major, email } = req.body || {};
 
   if (!name) {
@@ -178,12 +327,23 @@ router.put("/students/:id", async (req, res, next) => {
 
   try {
     const [existing] = await pool.query(
-      "SELECT id FROM students WHERE id = ?",
+      "SELECT id, user_id FROM students WHERE id = ?",
       [req.params.id],
     );
     if (existing.length === 0) {
       return res.status(404).json({
         error: { code: "STUDENT_NOT_FOUND", message: "ไม่พบข้อมูลนักศึกษา" },
+      });
+    }
+
+    const isOwner = existing[0].user_id === req.user.id;
+    const isAdmin = req.user.role === "admin";
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({
+        error: {
+          code: "FORBIDDEN",
+          message: "คุณไม่มีสิทธิ์แก้ไขข้อมูลนักศึกษารายนี้",
+        },
       });
     }
 
@@ -271,22 +431,27 @@ router.patch("/students/:id", async (req, res, next) => {
   }
 });
 
-// DELETE /api/v1/students/:id - ลบข้อมูลนักศึกษา
-router.delete("/students/:id", async (req, res, next) => {
-  try {
-    const [result] = await pool.query("DELETE FROM students WHERE id = ?", [
-      req.params.id,
-    ]);
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        error: { code: "STUDENT_NOT_FOUND", message: "ไม่พบข้อมูลนักศึกษา" },
-      });
+// DELETE /api/v1/students/:id - ลบข้อมูลนักศึกษา (ปกป้องด้วย Authentication + RBAC: เฉพาะ admin)
+router.delete(
+  "/students/:id",
+  authenticateToken,
+  authorizeRole("admin"),
+  async (req, res, next) => {
+    try {
+      const [result] = await pool.query("DELETE FROM students WHERE id = ?", [
+        req.params.id,
+      ]);
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          error: { code: "STUDENT_NOT_FOUND", message: "ไม่พบข้อมูลนักศึกษา" },
+        });
+      }
+      res.status(204).send();
+    } catch (err) {
+      next(err);
     }
-    res.status(204).send();
-  } catch (err) {
-    next(err);
-  }
-});
+  },
+);
 
 // POST /api/v1/students/:id/enrollments - ลงทะเบียนเรียนด้วย Transaction (ขั้นตอนที่ 3.3)
 router.post("/students/:id/enrollments", async (req, res, next) => {
