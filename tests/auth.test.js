@@ -1,4 +1,3 @@
-
 const request = require("supertest");
 
 jest.mock("../db", () => ({
@@ -105,6 +104,54 @@ describe("Authentication API", () => {
 
       expect(response.status).toBe(400);
       expect(response.body.error.code).toBe("VALIDATION_ERROR");
+    });
+  });
+
+  describe("GET /api/v1/auth/me", () => {
+    it("ควรตอบ 401 เมื่อไม่แนบ Authorization header", async () => {
+      const response = await request(app).get("/api/v1/auth/me");
+
+      expect(response.status).toBe(401);
+      expect(response.body.error.code).toBe("NO_TOKEN");
+    });
+
+    it("ควรตอบ 200 พร้อมข้อมูลผู้ใช้เมื่อแนบ token ที่ถูกต้อง", async () => {
+      const passwordHash = await hashPassword("password123");
+
+      pool.query.mockResolvedValueOnce([
+        [{
+          id: 1,
+          email: "student@example.com",
+          password_hash: passwordHash,
+          role: "student",
+        }],
+      ]);
+
+      const loginResponse = await request(app)
+        .post("/api/v1/auth/login")
+        .send({
+          email: "student@example.com",
+          password: "password123",
+        });
+
+      const token = loginResponse.body.token;
+
+      const response = await request(app)
+        .get("/api/v1/auth/me")
+        .set("Authorization", `Bearer ${token}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.email).toBe("student@example.com");
+      expect(response.body.data.role).toBe("student");
+    });
+
+    it("ควรตอบ 401 เมื่อ token ไม่ถูกต้อง (แก้ไขบางส่วน)", async () => {
+      const response = await request(app)
+        .get("/api/v1/auth/me")
+        .set("Authorization", "Bearer invalid.token.here");
+
+      expect(response.status).toBe(401);
+      expect(response.body.error.code).toBe("INVALID_TOKEN");
     });
   });
 });
