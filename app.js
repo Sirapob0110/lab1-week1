@@ -626,6 +626,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+/* istanbul ignore next -- เริ่ม server จริงเมื่อรันไฟล์ตรงๆ เท่านั้น ทดสอบผ่าน require() ไม่ได้ */
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(
