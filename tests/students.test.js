@@ -112,6 +112,7 @@ describe("Students API", () => {
         .post("/api/v1/students")
         .send({
           name: "สมปอง",
+          major: "IT",
           email: "duplicate@example.com",
         });
 
