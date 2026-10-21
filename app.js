@@ -11,6 +11,7 @@ const {
   generateToken,
 } = require("./auth-helpers");
 const { authenticateToken, authorizeRole } = require("./middlewares/auth");
+const { createStudentSchema } = require("./schemas/studentSchema");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +27,13 @@ app.use(
 );
 app.use(morgan("dev"));
 app.use(express.json({ limit: "10kb" }));
+
+// ===================== Rate Limiting (สัปดาห์ที่ 12) =====================
+const { authLimiter, generalLimiter } = require("./middlewares/rateLimiter");
+app.set("trust proxy", 1);
+app.use(generalLimiter);
+// จำกัดการลองเข้าสู่ระบบ ก่อนเข้า auth route
+app.use("/api/v1/auth/login", authLimiter);
 
 // แบบฝึกหัดที่ 1 (W4): ตรวจสอบ Content-Type สำหรับคำขอที่มี body
 function requireJson(req, res, next) {
@@ -262,23 +270,24 @@ router.get("/students/:id/courses", async (req, res, next) => {
 
 // POST /api/v1/students - เพิ่มนักศึกษาใหม่
 router.post("/students", simpleRateLimit, async (req, res, next) => {
-  const { name, major, email } = req.body || {};
-
-  if (!name) {
-    return res.status(400).json({
-      error: { code: "VALIDATION_ERROR", message: "กรุณาระบุชื่อ (name)" },
-    });
-  }
-
-  // แบบฝึกหัดที่ 3 (W4): จำกัดความยาวของ name ไม่เกิน 100 ตัวอักษร
-  if (typeof name === "string" && name.length > 100) {
+  // Advanced validation: ตรวจสอบ schema และเงื่อนไขสาขานานาชาติ
+  const result = createStudentSchema.safeParse(req.body);
+  if (!result.success) {
     return res.status(400).json({
       error: {
         code: "VALIDATION_ERROR",
-        message: "ชื่อ (name) ต้องมีความยาวไม่เกิน 100 ตัวอักษร",
+        message: "ข้อมูลที่ส่งมาไม่ถูกต้อง",
+        details: result.error.issues.map((issue) => ({
+          field: issue.path.join("."),
+          message: issue.message,
+        })),
       },
     });
   }
+
+  // ใช้เฉพาะข้อมูลที่ผ่านการตรวจสอบแล้ว; passportNumber ไม่อยู่ในตาราง students
+  const { name, major, email } = result.data;
+
 
   try {
     const [result] = await pool.query(
