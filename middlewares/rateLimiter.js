@@ -16,7 +16,7 @@ const authLimiter = rateLimit({
 
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === "test" ? 1000 : 100,
+  max: 100,
   standardHeaders: "draft-7",
   legacyHeaders: false,
 });
