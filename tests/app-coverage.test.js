@@ -50,12 +50,12 @@ describe("simpleRateLimit middleware", () => {
     for (let i = 0; i < 5; i++) {
       await request(app)
         .post("/api/v1/students")
-        .send({ name: `นักศึกษา ${i}` });
+        .send({ name: `นักศึกษา ${i}`, major: "IT", email: `student${i}@example.com` });
     }
 
     const response = await request(app)
       .post("/api/v1/students")
-      .send({ name: "นักศึกษาคนที่ 6" });
+      .send({ name: "นักศึกษาคนที่ 6", major: "IT", email: "student6@example.com" });
 
     expect(response.status).toBe(429);
     expect(response.body.error.code).toBe("TOO_MANY_REQUESTS");
@@ -78,7 +78,7 @@ describe("simpleRateLimit middleware", () => {
 
     const response = await request(app)
       .post("/api/v1/students")
-      .send({ name: "นักศึกษาหลัง reset" });
+      .send({ name: "นักศึกษาหลัง reset", major: "IT", email: "after-reset@example.com" });
 
     expect(response.status).toBe(201);
     Date.now.mockRestore();
@@ -246,7 +246,7 @@ describe("POST /api/v1/students - unexpected error", () => {
     pool.query.mockRejectedValueOnce(new Error("Unexpected DB failure"));
     const response = await request(app)
       .post("/api/v1/students")
-      .send({ name: "ทดสอบ" });
+      .send({ name: "ทดสอบ", major: "IT", email: "test@example.com" });
     expect(response.status).toBe(500);
   });
 });
