@@ -107,7 +107,14 @@ describe("POST /api/v1/auth/login - wrong password", () => {
   it("ควรตอบ 401 เมื่อพบอีเมลแต่รหัสผ่านผิด", async () => {
     const correctHash = await hashPassword("correctPassword");
     pool.query.mockResolvedValueOnce([
-      [{ id: 1, email: "x@example.com", password_hash: correctHash, role: "student" }],
+      [
+        {
+          id: 1,
+          email: "x@example.com",
+          password_hash: correctHash,
+          role: "student",
+        },
+      ],
     ]);
 
     const response = await request(app)
@@ -257,7 +264,9 @@ describe("POST /api/v1/students - unexpected error", () => {
 describe("PUT /api/v1/students/:id - validation and errors", () => {
   async function getToken(role = "admin") {
     const hash = await hashPassword("pass123");
-    pool.query.mockResolvedValueOnce([[{ id: 1, email: "a@a.com", password_hash: hash, role }]]);
+    pool.query.mockResolvedValueOnce([
+      [{ id: 1, email: "a@a.com", password_hash: hash, role }],
+    ]);
     const res = await request(app)
       .post("/api/v1/auth/login")
       .send({ email: "a@a.com", password: "pass123" });
@@ -310,7 +319,9 @@ describe("PATCH /api/v1/students/:id - validation and errors", () => {
   });
 
   it("ควรตอบ 409 เมื่ออีเมลซ้ำ (บรรทัด 422-430)", async () => {
-    pool.query.mockResolvedValueOnce([[{ id: 1, name: "เดิม", major: "IT", email: "a@a.com" }]]);
+    pool.query.mockResolvedValueOnce([
+      [{ id: 1, name: "เดิม", major: "IT", email: "a@a.com" }],
+    ]);
     pool.query.mockRejectedValueOnce({ code: "ER_DUP_ENTRY" });
 
     const response = await request(app)
@@ -328,7 +339,9 @@ describe("PATCH /api/v1/students/:id - validation and errors", () => {
 describe("DELETE /api/v1/students/:id - database error", () => {
   it("ควรตอบ 500 เมื่อ query ล้มเหลว", async () => {
     const hash = await hashPassword("pass123");
-    pool.query.mockResolvedValueOnce([[{ id: 1, email: "a@a.com", password_hash: hash, role: "admin" }]]);
+    pool.query.mockResolvedValueOnce([
+      [{ id: 1, email: "a@a.com", password_hash: hash, role: "admin" }],
+    ]);
     const loginRes = await request(app)
       .post("/api/v1/auth/login")
       .send({ email: "a@a.com", password: "pass123" });
@@ -428,7 +441,9 @@ describe("DELETE /api/v1/students/:id/enrollments/:courseId - unexpected error",
 // ---------------------------------------------------------------
 describe("Unknown route", () => {
   it("ควรตอบ 404 ROUTE_NOT_FOUND สำหรับ route ที่ไม่มีอยู่จริง", async () => {
-    const response = await request(app).get("/api/v1/this-route-does-not-exist");
+    const response = await request(app).get(
+      "/api/v1/this-route-does-not-exist",
+    );
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe("ROUTE_NOT_FOUND");
   });

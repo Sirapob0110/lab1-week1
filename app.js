@@ -45,32 +45,8 @@ function requireJson(req, res, next) {
 }
 app.use(requireJson);
 
-// แบบฝึกหัดที่ 2 (W4): จำกัดจำนวนคำขอ (Rate Limiting) เฉพาะ POST /api/v1/students
-const rateLimitStore = new Map();
-function simpleRateLimit(req, res, next) {
-  const windowMs = 60 * 1000;
-  const max = 5;
-  const key = req.ip;
-  const now = Date.now();
-  const entry = rateLimitStore.get(key) || { count: 0, start: now };
-
-  if (now - entry.start > windowMs) {
-    entry.count = 0;
-    entry.start = now;
-  }
-  entry.count += 1;
-  rateLimitStore.set(key, entry);
-
-  if (entry.count > max) {
-    return res.status(429).json({
-      error: {
-        code: "TOO_MANY_REQUESTS",
-        message: "คำขอเกินจำนวนที่กำหนด กรุณาลองใหม่ภายหลัง",
-      },
-    });
-  }
-  next();
-}
+// Lab 12: แยก rate limiter ตามความเสี่ยงของ endpoint
+const { authLimiter, generalLimiter, simpleRateLimit } = require("./middlewares/rateLimiter");
 
 // ===================== Routes (สัปดาห์ที่ 5: ย้ายไปใช้ MySQL) =====================
 const router = express.Router();
@@ -112,7 +88,7 @@ router.post("/auth/register", async (req, res, next) => {
 });
 
 // POST /api/v1/auth/login - เข้าสู่ระบบ ออก JWT
-router.post("/auth/login", async (req, res, next) => {
+router.post("/auth/login", authLimiter, async (req, res, next) => {
   const { email, password } = req.body || {};
 
   if (!email || !password) {
@@ -262,20 +238,19 @@ router.get("/students/:id/courses", async (req, res, next) => {
 
 // POST /api/v1/students - เพิ่มนักศึกษาใหม่
 router.post("/students", simpleRateLimit, async (req, res, next) => {
-  const { name, major, email } = req.body || {};
+  const { name, major, email, passportNumber } = req.body || {};
+  const { studentSchema } = require("./schemas/studentSchema");
+  const validation = studentSchema.safeParse({ name, major, email, passportNumber });
 
-  if (!name) {
-    return res.status(400).json({
-      error: { code: "VALIDATION_ERROR", message: "กรุณาระบุชื่อ (name)" },
-    });
-  }
-
-  // แบบฝึกหัดที่ 3 (W4): จำกัดความยาวของ name ไม่เกิน 100 ตัวอักษร
-  if (typeof name === "string" && name.length > 100) {
+  if (!validation.success) {
     return res.status(400).json({
       error: {
         code: "VALIDATION_ERROR",
-        message: "ชื่อ (name) ต้องมีความยาวไม่เกิน 100 ตัวอักษร",
+        message: "ข้อมูลที่ส่งมาไม่ถูกต้อง",
+        details: validation.error.issues.map((issue) => ({
+          field: issue.path.join("."),
+          message: issue.message,
+        })),
       },
     });
   }
@@ -602,7 +577,7 @@ router.delete("/students/:id/enrollments/:courseId", async (req, res, next) => {
   }
 });
 
-app.use("/api/v1", router);
+app.use("/api/v1", generalLimiter, router);
 
 // ===================== 404: ไม่พบ route ที่ร้องขอ =====================
 app.use((req, res) => {
